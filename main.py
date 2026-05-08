@@ -16,6 +16,7 @@ class FileCabinetApp:
 
         self.visible_entries = []
         self.selected_entry_id = None
+        self.search_var = tk.StringVar()
 
         self.build_layout()
         self.refresh_categories()
@@ -50,7 +51,7 @@ class FileCabinetApp:
         self.category_frame.pack(side="left", fill="y", padx=(0, 10))
         self.category_frame.pack_propagate(False)
 
-        self.entry_frame = tk.Frame(main_frame, bg="#ffffff", width=280)
+        self.entry_frame = tk.Frame(main_frame, bg="#ffffff", width=300)
         self.entry_frame.pack(side="left", fill="y", padx=(0, 10))
         self.entry_frame.pack_propagate(False)
 
@@ -102,6 +103,47 @@ class FileCabinetApp:
             bg="#ffffff"
         )
         label.pack(anchor="w", padx=12, pady=(15, 5))
+
+        search_label = tk.Label(
+            self.entry_frame,
+            text="Search entries",
+            font=("Arial", 9),
+            fg="#444444",
+            bg="#ffffff"
+        )
+        search_label.pack(anchor="w", padx=12)
+
+        self.search_entry = tk.Entry(
+            self.entry_frame,
+            textvariable=self.search_var,
+            width=28
+        )
+        self.search_entry.pack(anchor="w", padx=12, pady=(3, 5), fill="x")
+        self.search_entry.bind("<Return>", lambda event: self.search_entries())
+
+        search_button_frame = tk.Frame(self.entry_frame, bg="#ffffff")
+        search_button_frame.pack(fill="x", padx=12, pady=(0, 8))
+
+        tk.Button(
+            search_button_frame,
+            text="Search",
+            command=self.search_entries
+        ).pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        tk.Button(
+            search_button_frame,
+            text="Clear",
+            command=self.clear_search
+        ).pack(side="left", fill="x", expand=True)
+
+        self.result_label = tk.Label(
+            self.entry_frame,
+            text="",
+            font=("Arial", 9),
+            fg="#555555",
+            bg="#ffffff"
+        )
+        self.result_label.pack(anchor="w", padx=12)
 
         self.entry_listbox = tk.Listbox(
             self.entry_frame,
@@ -172,18 +214,13 @@ class FileCabinetApp:
         if self.category_listbox.size() > 0:
             self.category_listbox.selection_set(0)
 
-    def refresh_entry_list(self):
+    def refresh_entry_list(self, custom_entries=None):
         self.entry_listbox.delete(0, tk.END)
-        self.visible_entries = []
 
-        selected_category = self.get_selected_category()
-
-        for entry in self.entries:
-            if entry["status"] != "Active":
-                continue
-
-            if selected_category == "All Items" or entry["category"] == selected_category:
-                self.visible_entries.append(entry)
+        if custom_entries is None:
+            self.visible_entries = self.get_entries_for_current_view()
+        else:
+            self.visible_entries = custom_entries
 
         for entry in self.visible_entries:
             display_text = entry["title"]
@@ -192,6 +229,24 @@ class FileCabinetApp:
                 display_text = "★ " + display_text
 
             self.entry_listbox.insert(tk.END, display_text)
+
+        if len(self.visible_entries) == 1:
+            self.result_label.config(text="1 entry shown")
+        else:
+            self.result_label.config(text=str(len(self.visible_entries)) + " entries shown")
+
+    def get_entries_for_current_view(self):
+        selected_category = self.get_selected_category()
+        filtered_entries = []
+
+        for entry in self.entries:
+            if entry["status"] != "Active":
+                continue
+
+            if selected_category == "All Items" or entry["category"] == selected_category:
+                filtered_entries.append(entry)
+
+        return filtered_entries
 
     def get_selected_category(self):
         selected = self.category_listbox.curselection()
@@ -216,6 +271,7 @@ class FileCabinetApp:
 
     def category_selected(self, event):
         self.selected_entry_id = None
+        self.search_var.set("")
         self.refresh_entry_list()
         self.clear_preview()
 
@@ -398,6 +454,7 @@ class FileCabinetApp:
 
             file_handler.save_entries(self.entries)
 
+            self.search_var.set("")
             self.refresh_entry_list()
             self.clear_preview()
 
@@ -431,10 +488,46 @@ class FileCabinetApp:
             file_handler.save_entries(self.entries)
 
             self.selected_entry_id = None
+            self.search_var.set("")
             self.refresh_entry_list()
             self.clear_preview()
 
             messagebox.showinfo("Deleted", "Entry deleted successfully.")
+
+    def search_entries(self):
+        keyword = self.search_var.get().strip().lower()
+
+        if keyword == "":
+            self.refresh_entry_list()
+            self.clear_preview()
+            return
+
+        selected_category = self.get_selected_category()
+        results = []
+
+        for entry in self.entries:
+            if entry["status"] != "Active":
+                continue
+
+            if selected_category != "All Items" and entry["category"] != selected_category:
+                continue
+
+            searchable_text = (
+                entry["title"] + " " +
+                entry["category"] + " " +
+                entry["content"]
+            ).lower()
+
+            if keyword in searchable_text:
+                results.append(entry)
+
+        self.refresh_entry_list(results)
+        self.clear_preview()
+
+    def clear_search(self):
+        self.search_var.set("")
+        self.refresh_entry_list()
+        self.clear_preview()
 
 
 if __name__ == "__main__":
