@@ -1,5 +1,8 @@
+import os
+import sys
+import subprocess
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import messagebox, simpledialog, filedialog
 
 import file_handler
 
@@ -8,8 +11,8 @@ class FileCabinetApp:
     def __init__(self, root):
         self.root = root
         self.root.title("File Cabinet")
-        self.root.geometry("1000x600")
-        self.root.minsize(900, 500)
+        self.root.geometry("1050x620")
+        self.root.minsize(930, 520)
 
         self.entries = file_handler.load_entries()
         self.categories = file_handler.load_categories()
@@ -17,6 +20,7 @@ class FileCabinetApp:
         self.visible_entries = []
         self.selected_entry_id = None
         self.search_var = tk.StringVar()
+        self.show_archived_var = tk.IntVar()
 
         self.build_layout()
         self.refresh_categories()
@@ -51,7 +55,7 @@ class FileCabinetApp:
         self.category_frame.pack(side="left", fill="y", padx=(0, 10))
         self.category_frame.pack_propagate(False)
 
-        self.entry_frame = tk.Frame(main_frame, bg="#ffffff", width=300)
+        self.entry_frame = tk.Frame(main_frame, bg="#ffffff", width=310)
         self.entry_frame.pack(side="left", fill="y", padx=(0, 10))
         self.entry_frame.pack_propagate(False)
 
@@ -92,6 +96,12 @@ class FileCabinetApp:
             self.category_frame,
             text="Delete Category",
             command=self.delete_category
+        ).pack(fill="x", padx=12, pady=(0, 4))
+
+        tk.Button(
+            self.category_frame,
+            text="Backup Data",
+            command=self.backup_data
         ).pack(fill="x", padx=12, pady=(0, 12))
 
     def build_entry_panel(self):
@@ -136,6 +146,15 @@ class FileCabinetApp:
             command=self.clear_search
         ).pack(side="left", fill="x", expand=True)
 
+        self.show_archived_check = tk.Checkbutton(
+            self.entry_frame,
+            text="Show archived entries",
+            variable=self.show_archived_var,
+            command=self.refresh_entry_list,
+            bg="#ffffff"
+        )
+        self.show_archived_check.pack(anchor="w", padx=12, pady=(0, 6))
+
         self.result_label = tk.Label(
             self.entry_frame,
             text="",
@@ -169,6 +188,12 @@ class FileCabinetApp:
 
         tk.Button(
             self.entry_frame,
+            text="Archive / Restore",
+            command=self.archive_or_restore_entry
+        ).pack(fill="x", padx=12, pady=(0, 4))
+
+        tk.Button(
+            self.entry_frame,
             text="Delete Entry",
             command=self.delete_entry
         ).pack(fill="x", padx=12, pady=(0, 12))
@@ -190,7 +215,23 @@ class FileCabinetApp:
             fg="#555555",
             bg="#ffffff"
         )
-        self.preview_meta.pack(anchor="w", padx=18, pady=(0, 12))
+        self.preview_meta.pack(anchor="w", padx=18, pady=(0, 10))
+
+        self.attachment_label = tk.Label(
+            self.preview_frame,
+            text="",
+            font=("Arial", 10),
+            fg="#333333",
+            bg="#ffffff"
+        )
+        self.attachment_label.pack(anchor="w", padx=18, pady=(0, 6))
+
+        self.open_attachment_button = tk.Button(
+            self.preview_frame,
+            text="Open Attachment",
+            command=self.open_attachment
+        )
+        self.open_attachment_button.pack(anchor="w", padx=18, pady=(0, 12))
 
         self.preview_content = tk.Text(
             self.preview_frame,
@@ -228,6 +269,12 @@ class FileCabinetApp:
             if entry["is_favourite"] == "True":
                 display_text = "★ " + display_text
 
+            if entry["status"] == "Archived":
+                display_text = "[Archived] " + display_text
+
+            if entry["attachment_path"] != "":
+                display_text = display_text + " 📎"
+
             self.entry_listbox.insert(tk.END, display_text)
 
         if len(self.visible_entries) == 1:
@@ -237,14 +284,18 @@ class FileCabinetApp:
 
     def get_entries_for_current_view(self):
         selected_category = self.get_selected_category()
+        show_archived = self.show_archived_var.get() == 1
+
         filtered_entries = []
 
         for entry in self.entries:
-            if entry["status"] != "Active":
+            if not show_archived and entry["status"] == "Archived":
                 continue
 
             if selected_category == "All Items" or entry["category"] == selected_category:
                 filtered_entries.append(entry)
+
+        filtered_entries.sort(key=lambda item: item["is_favourite"] == "True", reverse=True)
 
         return filtered_entries
 
@@ -285,15 +336,26 @@ class FileCabinetApp:
         self.show_preview(entry)
 
     def show_preview(self, entry):
-        self.preview_title.config(text=entry["title"])
+        title_text = entry["title"]
+
+        if entry["is_favourite"] == "True":
+            title_text = "★ " + title_text
+
+        self.preview_title.config(text=title_text)
 
         meta_text = (
             "Category: " + entry["category"] +
             "    Created: " + entry["date_created"] +
-            "    Modified: " + entry["date_modified"]
+            "    Modified: " + entry["date_modified"] +
+            "    Status: " + entry["status"]
         )
 
         self.preview_meta.config(text=meta_text)
+
+        if entry["attachment_path"] == "":
+            self.attachment_label.config(text="Attachment: None")
+        else:
+            self.attachment_label.config(text="Attachment: " + entry["attachment_path"])
 
         self.preview_content.config(state="normal")
         self.preview_content.delete("1.0", tk.END)
@@ -303,6 +365,7 @@ class FileCabinetApp:
     def clear_preview(self):
         self.preview_title.config(text="Select an entry")
         self.preview_meta.config(text="No entry selected.")
+        self.attachment_label.config(text="Attachment: None")
 
         self.preview_content.config(state="normal")
         self.preview_content.delete("1.0", tk.END)
@@ -380,7 +443,7 @@ class FileCabinetApp:
     def open_entry_window(self, mode, category, entry=None):
         window = tk.Toplevel(self.root)
         window.title("Entry Editor")
-        window.geometry("500x420")
+        window.geometry("540x510")
         window.configure(bg="#f4f6f8")
 
         tk.Label(
@@ -403,29 +466,83 @@ class FileCabinetApp:
             bg="#f4f6f8"
         ).pack(anchor="w", padx=15, pady=(15, 0))
 
-        title_entry = tk.Entry(window, width=55)
+        title_entry = tk.Entry(window, width=60)
         title_entry.pack(anchor="w", padx=15)
+
+        favourite_var = tk.IntVar()
+
+        tk.Checkbutton(
+            window,
+            text="Mark as important",
+            variable=favourite_var,
+            bg="#f4f6f8"
+        ).pack(anchor="w", padx=15, pady=(10, 0))
 
         tk.Label(
             window,
             text="Content",
             bg="#f4f6f8"
-        ).pack(anchor="w", padx=15, pady=(15, 0))
+        ).pack(anchor="w", padx=15, pady=(12, 0))
 
-        content_text = tk.Text(window, width=58, height=12, wrap="word")
+        content_text = tk.Text(window, width=62, height=10, wrap="word")
         content_text.pack(anchor="w", padx=15)
+
+        attachment_var = tk.StringVar()
+
+        tk.Label(
+            window,
+            text="Attachment",
+            bg="#f4f6f8"
+        ).pack(anchor="w", padx=15, pady=(12, 0))
+
+        attachment_frame = tk.Frame(window, bg="#f4f6f8")
+        attachment_frame.pack(fill="x", padx=15)
+
+        attachment_entry = tk.Entry(
+            attachment_frame,
+            textvariable=attachment_var,
+            width=48
+        )
+        attachment_entry.pack(side="left", fill="x", expand=True)
+
+        def browse_file():
+            file_path = filedialog.askopenfilename(title="Select a file to attach")
+
+            if file_path:
+                attachment_var.set(file_path)
+
+        tk.Button(
+            attachment_frame,
+            text="Browse",
+            command=browse_file
+        ).pack(side="left", padx=(5, 0))
 
         if mode == "edit" and entry is not None:
             title_entry.insert(0, entry["title"])
             content_text.insert(tk.END, entry["content"])
+            attachment_var.set(entry["attachment_path"])
+
+            if entry["is_favourite"] == "True":
+                favourite_var.set(1)
 
         def save_from_window():
             title = title_entry.get().strip()
             content = content_text.get("1.0", tk.END).strip()
+            attachment_path = attachment_var.get().strip()
+            favourite_value = "True" if favourite_var.get() == 1 else "False"
 
             if title == "":
                 messagebox.showerror("Error", "Title cannot be empty.")
                 return
+
+            if attachment_path != "" and not os.path.exists(attachment_path):
+                confirm = messagebox.askyesno(
+                    "Attachment Warning",
+                    "This attachment path does not exist. Do you still want to save it?"
+                )
+
+                if not confirm:
+                    return
 
             current_date = file_handler.get_current_date()
 
@@ -435,10 +552,10 @@ class FileCabinetApp:
                     "title": title,
                     "category": category,
                     "content": content,
-                    "attachment_path": "",
+                    "attachment_path": attachment_path,
                     "date_created": current_date,
                     "date_modified": current_date,
-                    "is_favourite": "False",
+                    "is_favourite": favourite_value,
                     "status": "Active"
                 }
 
@@ -449,7 +566,9 @@ class FileCabinetApp:
                     if saved_entry["entry_id"] == entry["entry_id"]:
                         saved_entry["title"] = title
                         saved_entry["content"] = content
+                        saved_entry["attachment_path"] = attachment_path
                         saved_entry["date_modified"] = current_date
+                        saved_entry["is_favourite"] = favourite_value
                         break
 
             file_handler.save_entries(self.entries)
@@ -494,6 +613,75 @@ class FileCabinetApp:
 
             messagebox.showinfo("Deleted", "Entry deleted successfully.")
 
+    def archive_or_restore_entry(self):
+        entry = self.get_selected_entry()
+
+        if entry is None:
+            messagebox.showerror("Error", "Please select an entry first.")
+            return
+
+        for saved_entry in self.entries:
+            if saved_entry["entry_id"] == entry["entry_id"]:
+                if saved_entry["status"] == "Archived":
+                    saved_entry["status"] = "Active"
+                    message = "Entry restored successfully."
+                else:
+                    saved_entry["status"] = "Archived"
+                    message = "Entry archived successfully."
+
+                saved_entry["date_modified"] = file_handler.get_current_date()
+                break
+
+        file_handler.save_entries(self.entries)
+
+        self.search_var.set("")
+        self.refresh_entry_list()
+        self.clear_preview()
+
+        messagebox.showinfo("Updated", message)
+
+    def open_attachment(self):
+        entry = self.get_selected_entry()
+
+        if entry is None:
+            messagebox.showerror("Error", "Please select an entry first.")
+            return
+
+        attachment_path = entry["attachment_path"]
+
+        if attachment_path == "":
+            messagebox.showerror("Error", "This entry does not have an attachment.")
+            return
+
+        if not os.path.exists(attachment_path):
+            messagebox.showerror(
+                "Error",
+                "The attached file could not be found. It may have been moved or deleted."
+            )
+            return
+
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(attachment_path)
+            elif sys.platform == "darwin":
+                subprocess.call(["open", attachment_path])
+            else:
+                subprocess.call(["xdg-open", attachment_path])
+
+        except Exception:
+            messagebox.showerror("Error", "The attached file could not be opened.")
+
+    def backup_data(self):
+        try:
+            file_handler.backup_data()
+            messagebox.showinfo(
+                "Backup Complete",
+                "A backup copy of the CSV files has been created."
+            )
+
+        except Exception:
+            messagebox.showerror("Error", "Backup could not be created.")
+
     def search_entries(self):
         keyword = self.search_var.get().strip().lower()
 
@@ -503,10 +691,11 @@ class FileCabinetApp:
             return
 
         selected_category = self.get_selected_category()
+        show_archived = self.show_archived_var.get() == 1
         results = []
 
         for entry in self.entries:
-            if entry["status"] != "Active":
+            if not show_archived and entry["status"] == "Archived":
                 continue
 
             if selected_category != "All Items" and entry["category"] != selected_category:

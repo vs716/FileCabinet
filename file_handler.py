@@ -1,8 +1,11 @@
 import csv
 import os
+import shutil
 from datetime import datetime
 
 DATA_FOLDER = "data"
+BACKUP_FOLDER = "backups"
+
 ENTRIES_FILE = os.path.join(DATA_FOLDER, "file_cabinet_entries.csv")
 CATEGORIES_FILE = os.path.join(DATA_FOLDER, "file_cabinet_categories.csv")
 
@@ -31,6 +34,9 @@ DEFAULT_CATEGORIES = [
 def setup_files():
     if not os.path.exists(DATA_FOLDER):
         os.makedirs(DATA_FOLDER)
+
+    if not os.path.exists(BACKUP_FOLDER):
+        os.makedirs(BACKUP_FOLDER)
 
     if not os.path.exists(ENTRIES_FILE):
         with open(ENTRIES_FILE, "w", newline="", encoding="utf-8") as file:
@@ -125,3 +131,24 @@ def get_next_entry_id(entries):
 
 def get_current_date():
     return datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def backup_data():
+    setup_files()
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    entries_backup = os.path.join(
+        BACKUP_FOLDER,
+        "file_cabinet_entries_backup_" + timestamp + ".csv"
+    )
+
+    categories_backup = os.path.join(
+        BACKUP_FOLDER,
+        "file_cabinet_categories_backup_" + timestamp + ".csv"
+    )
+
+    shutil.copy(ENTRIES_FILE, entries_backup)
+    shutil.copy(CATEGORIES_FILE, categories_backup)
+
+    return entries_backup, categories_backup
